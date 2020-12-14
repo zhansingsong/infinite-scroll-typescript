@@ -62,7 +62,6 @@ const InfiniteScrollExtend = (props: InfiniteScrollProps) => {
     hasMore = false,
     initialLoad = true,
     pageStart = 0,
-    ref = null,
     threshold = 250,
     useWindow = true,
     isReverse = false,
@@ -74,16 +73,21 @@ const InfiniteScrollExtend = (props: InfiniteScrollProps) => {
     ...restProps
   } = props;
 
-  let isLoadMore: boolean = false;
-  let beforeScrollHeight: number = 0;
-  let beforeScrollTop: number = 0;
-  let pageLoaded: number = 0;
+  type beforeSizeType = {
+    scrollHeight: number;
+    scrollTop: number;
+  };
 
   const scrollComponentRef = useRef<HTMLElement>(null!);
-  
+  const isLoadMoreRef = useRef<boolean>(false);
+  const pageLoadedRef = useRef<number>(0);
+  const beforeSizeRef = useRef<beforeSizeType>({scrollHeight: 0, scrollTop: 0});
+  const scrollContainerRef = useRef<Element | typeof window>(window);
+
   // event listener passive: https://github.com/WICG/EventListenerOptions/blob/gh-pages/explainer.md
-  // By marking a touch or wheel listener as passive, the developer is promising the handler won't call preventDefault to disable scrolling. 
+  // By marking a touch or wheel listener as passive, the developer is promising the handler won't call preventDefault to disable scrolling.
   type EventListenerOptionsType = AddEventListenerOptions | boolean;
+  const listenerOptionsRef = useRef<EventListenerOptionsType>(false);
   // 是否支持 passive: https://github.com/WICG/EventListenerOptions/blob/gh-pages/EventListenerOptions.polyfill.js
   function isPassiveSupported(): boolean {
     let supported = false;
@@ -92,6 +96,7 @@ const InfiniteScrollExtend = (props: InfiniteScrollProps) => {
       const opts = Object.defineProperty({}, 'passive', {
         get() {
           supported = true;
+          return supported;
         },
       });
       (document as any).addEventListener('test', null, opts);
@@ -112,55 +117,53 @@ const InfiniteScrollExtend = (props: InfiniteScrollProps) => {
     return options;
   };
   // 只执行一次
-  let listenerOptions = useMemo(eventListenerOptions, []);
+  listenerOptionsRef.current = useMemo(eventListenerOptions, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // 更新
-    listenerOptions = eventListenerOptions();
-  }, []);
-
+    listenerOptionsRef.current = eventListenerOptions();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function calculateTopPosition(el: HTMLElement | null): number {
-    if (!el) {
+    if (el === null) {
       return 0;
     }
     return el.offsetTop + calculateTopPosition(el.offsetParent as HTMLElement);
   }
 
   function calculateOffset(el: HTMLElement, scrollTop: number): number {
-    if (!el) {
+    if (el === null) {
       return 0;
     }
-
-    return calculateTopPosition(el) + (el.offsetHeight - scrollTop - window.innerHeight);
+    let res = calculateTopPosition(el) + (el.offsetHeight - scrollTop - window.innerHeight);
+    return res;
   }
 
-  function getParentElement(el: HTMLElement): HTMLElement {
+  function getParentElement(el: Element): Element {
     const scrollParent = getScrollParent && getScrollParent();
-    if (scrollParent != null) {
+    if (scrollParent !== null) {
       return scrollParent;
     }
-    return el && (el.parentNode as HTMLElement);
+    return el && (el.parentNode as Element);
   }
-
 
   const mousewheelListener: EventListener = (e: Event) => {
     // Prevents Chrome hangups
     // See: https://stackoverflow.com/questions/47524205/random-high-content-download-time-in-chrome/47684257#47684257
-    // tells the browser that the wheel listeners will not call preventDefault() and the browser can safely perform scrolling and zooming without blocking on the listeners.
     if ((e as WheelEvent).deltaY === 1 && !isPassiveSupported()) {
       e.preventDefault();
     }
   };
-  
+
   const scrollListener = () => {
+    // 做兼容处理
     const el = scrollComponentRef.current;
-    const scrollEl = window;
-    const parentNode = getParentElement(el);
+    const win = scrollContainerRef.current as Window;
+    const parentNode = scrollContainerRef.current as Element;
 
     let offset;
     if (useWindow) {
       const doc = document.documentElement || document.body.parentNode || document.body;
-      const scrollTop = scrollEl.pageYOffset !== undefined ? scrollEl.pageYOffset : doc.scrollTop;
+      const scrollTop = win.pageYOffset !== undefined ? win.pageYOffset : doc.scrollTop;
       if (isReverse) {
         offset = scrollTop;
       } else {
@@ -173,76 +176,65 @@ const InfiniteScrollExtend = (props: InfiniteScrollProps) => {
     }
 
     // Here we make sure the element is visible as well as checking the offset
-    if (offset < Number(threshold) && el && el.offsetParent !== null) {
-      detachScrollListener();
-      beforeScrollHeight = parentNode.scrollHeight;
-      beforeScrollTop = parentNode.scrollTop;
+    if (offset <= Number(threshold) && el && el.offsetParent !== null) {
+      // detachScrollListener();
+      if (isReverse) {
+        beforeSizeRef.current.scrollHeight = el.scrollHeight;
+        beforeSizeRef.current.scrollTop = offset;
+      }
       // Call loadMore after detachScrollListener to allow for non-async loadMore functions
       if (typeof loadMore === 'function') {
-        loadMore((pageLoaded += 1));
-        isLoadMore = true;
+        loadMore((pageLoadedRef.current += 1));
+        isLoadMoreRef.current = true;
       }
     }
   };
   const attachScrollListener = () => {
+    // if (!hasMore) {
+    //   return;
+    // }
+    console.log('attachScrollListener');
+    scrollContainerRef.current.addEventListener('mousewheel', mousewheelListener, listenerOptionsRef.current);
+    scrollContainerRef.current.addEventListener('scroll', scrollListener, listenerOptionsRef.current);
+    scrollContainerRef.current.addEventListener('resize', scrollListener, listenerOptionsRef.current);
+  };
+  const detachScrollListener = () => {
+    scrollContainerRef.current.removeEventListener('mousewheel', mousewheelListener, listenerOptionsRef.current);
+    scrollContainerRef.current.removeEventListener('scroll', scrollListener, listenerOptionsRef.current);
+    scrollContainerRef.current.removeEventListener('resize', scrollListener, listenerOptionsRef.current);
+  };
+
+  useEffect(() => {
+    pageLoadedRef.current = pageStart === -1 ? 0 : pageStart;
     const parentElement = getParentElement(scrollComponentRef.current);
-
-    if (!hasMore || !parentElement) {
-      return;
-    }
-    let scrollEl: (Node & ParentNode) | typeof window = window;
     if (useWindow === false && parentElement) {
-      scrollEl = parentElement;
+      scrollContainerRef.current = parentElement;
     }
-
-    scrollEl.addEventListener('mousewheel', mousewheelListener, listenerOptions);
-    scrollEl.addEventListener('scroll', scrollListener, listenerOptions);
-    scrollEl.addEventListener('resize', scrollListener, listenerOptions);
-
+    attachScrollListener();
     if (initialLoad) {
       scrollListener();
     }
-  };
-  const detachMousewheelListener = () => {
-    let scrollEl: (Node & ParentNode) | typeof window = window;
-    if (useWindow === false && scrollComponentRef.current.parentNode) {
-      scrollEl = scrollComponentRef.current.parentNode;
-    }
-
-    scrollEl.removeEventListener('mousewheel', mousewheelListener, listenerOptions);
-  };
-
-  const detachScrollListener = () => {
-    let scrollEl: (Node & ParentNode) | typeof window = window;
-    const parentElement = getParentElement(scrollComponentRef.current);
-    if (useWindow === false && parentElement) {
-      scrollEl = parentElement;
-    }
-
-    scrollEl.removeEventListener('scroll', scrollListener, listenerOptions);
-    scrollEl.removeEventListener('resize', scrollListener, listenerOptions);
-  };
-
-  useEffect(() => {
-    pageLoaded = pageStart === -1 ? 0 : pageStart;
-    attachScrollListener();
+    console.log('first useEffect', pageLoadedRef.current);
     return () => {
       detachScrollListener();
-      detachMousewheelListener();
     };
-  }, [pageStart]);
+  }, [pageStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    // if (isReverse && isLoadMore) {
-    //   const parentElement = getParentElement(scrollComponentRef.current);
-    //   parentElement.scrollTop = parentElement.scrollHeight - beforeScrollHeight + beforeScrollTop;
-    //   isLoadMore = false;
-    // }
-    attachScrollListener();
-    return () => {
-      detachScrollListener();
-      detachMousewheelListener();
-    };
+    if (isReverse && isLoadMoreRef.current) {
+      if (typeof scrollContainerRef.current.scrollTo === 'function') {
+        scrollContainerRef.current.scrollTo(
+          0,
+          scrollComponentRef.current.scrollHeight - beforeSizeRef.current.scrollHeight + beforeSizeRef.current.scrollTop
+        );
+      } else {
+        (scrollContainerRef.current as Element).scrollTop =
+          scrollComponentRef.current.scrollHeight -
+          beforeSizeRef.current.scrollHeight +
+          beforeSizeRef.current.scrollTop;
+      }
+      isLoadMoreRef.current = false;
+    }
   });
 
   const childrenArray = [children];

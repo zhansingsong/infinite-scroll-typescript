@@ -1,5 +1,6 @@
 const Mock = require('mockjs');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+let counter = 0;
 var data = Mock.mock({
   // 属性 list 的值是一个数组，其中含有 1 到 10 个元素
   'data|10-12': [{
@@ -30,6 +31,10 @@ module.exports = function (app) {
   app.use(
     '/api/list',
     (req, res) => {
+      // if(counter >= 10){
+      //   data = []
+      // }
+      counter++;
       res.send(data);
     }
   );

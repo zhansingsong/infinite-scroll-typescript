@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import _ from 'lodash';
 import axios from 'axios';
 import IS from './IS';
@@ -19,16 +19,21 @@ type ListType = {
 function App() {
   const [listData, setListData] = useState<ListType[]>([]);
   const [pageCount, setPageCount] = useState<number>(0);
-  const [hasMoreItems, setHasMoreItems] = useState<boolean>(true);
+  const [hasMoreItems, setHasMoreItems] = useState<boolean>(false);
   const initState = () => {
     setListData([]);
   }
-  const loadItems = (page: number) => {
-    if(page === 5){
-      setPageCount(-1);
-      setHasMoreItems(false);
-    }
+  useEffect(() => {
     setHasMoreItems(true);
+  }, [])
+  const loadItems = (page: number) => {
+    console.log(page, 'page----------->')
+    if(page === 5){
+      console.log('vvv')
+      setPageCount(p => p === -1 ? 0 : -1);
+      setHasMoreItems(false);
+      return;
+    }
     axios({
       url: '/api/list',
       method: 'get',
@@ -40,7 +45,8 @@ function App() {
     <div className="App">
       <Button type="primary" onClick={initState}>重新加载</Button>
       <IS
-        initialLoad
+        // initialLoad
+        // isReverse
         pageStart={pageCount}
         loadMore={loadItems}
         hasMore={hasMoreItems}
@@ -55,7 +61,7 @@ function App() {
             renderItem = {item => {
               return (
                 <List.Item
-                key={item.title}
+                key={item.url}
                 extra={
                   <img
                     width={200}
